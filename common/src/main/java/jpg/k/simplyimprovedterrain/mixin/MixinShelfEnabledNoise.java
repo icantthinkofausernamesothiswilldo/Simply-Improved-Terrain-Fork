@@ -1,12 +1,16 @@
 package jpg.k.simplyimprovedterrain.mixin;
 
 import net.minecraft.util.Mth;
+import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.levelgen.synth.ImprovedNoise;
 import org.apache.commons.lang3.NotImplementedException;
+import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /*
@@ -27,12 +31,18 @@ public abstract class MixinShelfEnabledNoise {
     private static final double ROOT3OVER2 = 0.8660254037844386;
     private static final double ROOT3OVER3 = 0.577350269189626;
     private static final double ROTATE_ORTHOGONALIZER = -0.211324865405187;
+    @Unique
+    private final int[] py = new int[512];
+    @Unique
+    private final int[] pz = new int[512];
 
     @Shadow protected abstract double sampleAndLerp(int xb, int yb, int zb, double dx, double dy, double dz, double dy2);
     @Shadow protected abstract int p(int i);
     @Shadow protected static double gradDot(int p, double v, double e, double f) {
         throw new NotImplementedException();
     }
+
+    @Shadow @Final private byte[] p;
 
     @Inject(method = "noise(DDDDD)D", at = @At("HEAD"), cancellable = true)
     public void injectNoise(double x, double y, double z, double shelfParam1, double shelfParam2, CallbackInfoReturnable<Double> cir) {
@@ -83,20 +93,22 @@ public abstract class MixinShelfEnabledNoise {
     }
 
     private double sampleAndLerpWithNewShelves(int xb, int yb, int zb, double dx, double dy, double dz) {
-        int h0YZ = this.p(xb);
-        int h1YZ = this.p(xb + 1);
-        int h00Z = this.p(h0YZ + yb);
-        int h01Z = this.p(h0YZ + yb + 1);
-        int h10Z = this.p(h1YZ + yb);
-        int h11Z = this.p(h1YZ + yb + 1);
-        double h = gradDotWithNewShelves(this.p(h00Z + zb), dx, dy, dz);
-        double r = gradDotWithNewShelves(this.p(h10Z + zb), dx - 1.0D, dy, dz);
-        double s = gradDotWithNewShelves(this.p(h01Z + zb), dx, dy - 1.0D, dz);
-        double t = gradDotWithNewShelves(this.p(h11Z + zb), dx - 1.0D, dy - 1.0D, dz);
-        double u = gradDotWithNewShelves(this.p(h00Z + zb + 1), dx, dy, dz - 1.0D);
-        double v = gradDotWithNewShelves(this.p(h10Z + zb + 1), dx - 1.0D, dy, dz - 1.0D);
-        double w = gradDotWithNewShelves(this.p(h01Z + zb + 1), dx, dy - 1.0D, dz - 1.0D);
-        double x = gradDotWithNewShelves(this.p(h11Z + zb + 1), dx - 1.0D, dy - 1.0D, dz - 1.0D);
+        int h0YZ = p[xb & 255];
+        int h1YZ = p[(xb + 1) & 255];
+        int h00Z = h0YZ ^ py[yb & 255];
+        int h01Z = h0YZ ^ py[(yb + 1) & 255];
+        int h10Z = h1YZ ^ py[yb & 255];
+        int h11Z = h1YZ ^ py[(yb + 1) & 255];
+        int hzb0 = pz[zb & 255];
+        int hzb1 = pz[(zb + 1) & 255];
+        double h = gradDotWithNewShelves(h00Z ^ hzb0, dx, dy, dz);
+        double r = gradDotWithNewShelves(h10Z ^ hzb0, dx - 1.0D, dy, dz);
+        double s = gradDotWithNewShelves(h01Z ^ hzb0, dx, dy - 1.0D, dz);
+        double t = gradDotWithNewShelves(h11Z ^ hzb0, dx - 1.0D, dy - 1.0D, dz);
+        double u = gradDotWithNewShelves(h00Z ^ hzb1, dx, dy, dz - 1.0D);
+        double v = gradDotWithNewShelves(h10Z ^ hzb1, dx - 1.0D, dy, dz - 1.0D);
+        double w = gradDotWithNewShelves(h01Z ^ hzb1, dx, dy - 1.0D, dz - 1.0D);
+        double x = gradDotWithNewShelves(h11Z ^ hzb1, dx - 1.0D, dy - 1.0D, dz - 1.0D);
         double y = Mth.smoothstep(dx);
         double z = Mth.smoothstep(dy);
         double aa = Mth.smoothstep(dz);
@@ -116,4 +128,27 @@ public abstract class MixinShelfEnabledNoise {
         else return gradDot(hash256, dx, dy, dz);
     }
 
+    @Inject(method = "<init>", at = @At("TAIL"))
+    private void injInit(RandomSource randomSource, CallbackInfo ci)
+    {
+        for(int i = 0; i < 256; this.py[i] = i++) {
+        }
+
+        for(int i = 0; i < 256; ++i) {
+            int j = randomSource.nextInt(256 - i);
+            int k = this.py[i];
+            this.py[i] = this.py[j + i];
+            this.py[j + i] = k;
+        }
+
+        for(int i = 0; i < 256; this.pz[i] = i++) {
+        }
+
+        for(int i = 0; i < 256; ++i) {
+            int j = randomSource.nextInt(256 - i);
+            int k = this.pz[i];
+            this.pz[i] = this.pz[j + i];
+            this.pz[j + i] = k;
+        }
+    }
 }
