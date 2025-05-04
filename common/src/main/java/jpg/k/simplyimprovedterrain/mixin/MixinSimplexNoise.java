@@ -2,17 +2,20 @@ package jpg.k.simplyimprovedterrain.mixin;
 
 import jpg.k.simplyimprovedterrain.mixinapi.IMixinSimplexNoise;
 import net.minecraft.util.Mth;
+import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.levelgen.synth.SimplexNoise;
-import org.apache.commons.lang3.NotImplementedException;
-import org.spongepowered.asm.mixin.Final;
-import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Overwrite;
-import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.*;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(value = SimplexNoise.class, priority = 250)
 public class MixinSimplexNoise implements IMixinSimplexNoise {
 
     @Shadow @Final private int[] p;
+    @Unique private final int[] py = new int[512];
+    @Unique
+    private final int[] pz = new int[512];
 
     private static final double SKEW_2D = 0.366025403784439;
     private static final double UNSKEW_2D = -0.21132486540518713;
@@ -59,11 +62,6 @@ public class MixinSimplexNoise implements IMixinSimplexNoise {
         for (int i = 0; i < GRAD_VECTORS_2_24_128.length; i++) GRAD_VECTORS_2_24_128[i] /= NORMALIZATION_DIVISOR_2D;
     }
 
-    @Shadow
-    private int p(int i) {
-        throw new NotImplementedException();
-    }
-
     @Override
     public int[] getPermutationTable() {
         return this.p;
@@ -92,7 +90,7 @@ public class MixinSimplexNoise implements IMixinSimplexNoise {
         double value = 0;
         double a0 = RSQUARED_2D - dx0 * dx0 - dy0 * dy0;
         if (a0 > 0) {
-            value = (a0 * a0) * (a0 * a0) * grad(this.p(xsb + this.p(ysb)), dx0, dy0);
+            value = (a0 * a0) * (a0 * a0) * grad(p[xsb & 255] ^ py[ysb & 255], dx0, dy0);
         }
 
         // Second vertex.
@@ -100,7 +98,7 @@ public class MixinSimplexNoise implements IMixinSimplexNoise {
         if (a1 > 0) {
             double dx1 = dx0 - (1 + 2 * UNSKEW_2D);
             double dy1 = dy0 - (1 + 2 * UNSKEW_2D);
-            value += (a1 * a1) * (a1 * a1) * grad(this.p(xsb + 1 + this.p(ysb + 1)), dx1, dy1);
+            value += (a1 * a1) * (a1 * a1) * grad(p[(xsb + 1) & 255] ^ py[(ysb + 1) & 255], dx1, dy1);
         }
 
         // Third vertex.
@@ -109,14 +107,14 @@ public class MixinSimplexNoise implements IMixinSimplexNoise {
             double dy2 = dy0 - (UNSKEW_2D + 1);
             double a2 = RSQUARED_2D - dx2 * dx2 - dy2 * dy2;
             if (a2 > 0) {
-                value += (a2 * a2) * (a2 * a2) * grad(this.p(xsb + this.p(ysb + 1)), dx2, dy2);
+                value += (a2 * a2) * (a2 * a2) * grad(p[xsb & 255] ^ py[(ysb+1) & 255], dx2, dy2);
             }
         } else {
             double dx2 = dx0 - (UNSKEW_2D + 1);
             double dy2 = dy0 - UNSKEW_2D;
             double a2 = RSQUARED_2D - dx2 * dx2 - dy2 * dy2;
             if (a2 > 0) {
-                value += (a2 * a2) * (a2 * a2) * grad(this.p(xsb + 1 + this.p(ysb)), dx2, dy2);
+                value += (a2 * a2) * (a2 * a2) * grad(p[(xsb + 1) & 255] ^ py[ysb & 255], dx2, dy2);
             }
         }
 
@@ -134,5 +132,29 @@ public class MixinSimplexNoise implements IMixinSimplexNoise {
         if ((hash & 0x01) != 0) value *= GRADIENT_MAGNITUDE_VARIATION;
 
         return value;
+    }
+
+    @Inject(method = "<init>", at = @At("TAIL"), remap = false)
+    private void injInit(RandomSource randomSource, CallbackInfo ci)
+    {
+        for(int i = 0; i < 256; this.py[i] = i++) {
+        }
+
+        for(int i = 0; i < 256; ++i) {
+            int j = randomSource.nextInt(256 - i);
+            int k = this.py[i];
+            this.py[i] = this.py[j + i];
+            this.py[j + i] = k;
+        }
+
+        for(int i = 0; i < 256; this.pz[i] = i++) {
+        }
+
+        for(int i = 0; i < 256; ++i) {
+            int j = randomSource.nextInt(256 - i);
+            int k = this.pz[i];
+            this.pz[i] = this.pz[j + i];
+            this.pz[j + i] = k;
+        }
     }
 }
